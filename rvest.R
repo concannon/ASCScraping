@@ -37,14 +37,10 @@ d <- phds %>%
   gsub('\r\n','',.) %>% 
   gsub("[\\]",'',.)
 
-  #tail(d,50)  
-
 
 ##Parse
 #Years
 yr <- "[1-9][0-9]{3}"
-
-
 
 years <- str_locate_all(d,yr)
 yearloc <- lapply(years,'[',1)
@@ -122,7 +118,7 @@ univ <- data.frame(inst=unique(inst))
 univ$inst <- as.character(univ$inst)
 univ <- na.omit(univ)
 names(univ)
-)
+
 
 geo <- geocode(univ$inst)  
 univ <- cbind(univ,geo)
@@ -213,7 +209,7 @@ hc_add_series_labels_values(top50$term,top50$freq,
   
   
 #Graphs
-findAssocs(term.matrix,"police",.2)
+findAssocs(term.matrix,"risk",.2)
 freq.terms <- findFreqTerms(term.matrix,lowfreq=15)
 plot(term.matrix,term=freq.terms,corThreshold = .05,weighting=T)
 
@@ -253,6 +249,7 @@ library(topicmodels)
   term
   
   
+  renderVis(term)
   
   
   

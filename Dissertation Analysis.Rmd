@@ -1,0 +1,335 @@
+---
+title: "Dissertation Analysis"
+author: "Connor Concannon"
+date: "September 4, 2016"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 9
+---
+
+## Introduction
+
+Months ago, I was perusing the [American Society of Criminology's](http://asc41.com) website and came across a [list of recent dissertations](http://www.asc41.com/graduates1.htm), including topics, authors, and instutitions.  
+
+The list was interesting to me for a few reasons.  One, I need to begin thinking about a dissertation topic, and I would like to get a sense of recent dissertations, without having to actually read them.  Two, the list was an opportunity to do some exploratory analysis and use some techniques and packages that I am not too familiar with, namely web scraping.  And three, I could use this as an opportunity to publish a quick analysis and begin building a portfolio of analytical projects that are not necessarily work-related.  
+
+First, load a bunch of libraries.
+
+```{r setup, include=T,message=F,warning=F}
+
+pkg <- c('tidytext','rvest','stringr','dplyr','tm','SnowballC','wordcloud','DescTools',
+'ggmap','Amelia','leaflet','highcharter','LDAvis','graph','tidyr','Rgraphviz','ggplot2')
+
+suppressMessages(
+sapply(pkg,library,character.only=T))
+options(scipen=1000)
+
+
+
+```
+
+
+
+## Scraping and Cleaning
+
+Next, I take the url, extract the data and clean it up quite a bit.  I have never tried any webscraping, but rvest makes it seem easy.  I am sure this can be improved, chained into a neater workflow, errors removed, etc., but I am not striving for perfection.  This was the most frustrating part, as the page seems to lack a consistent format for the information.  I am most interested in the topics, so the rest is not a big deal.  The code is not too interesting, but can be [viewed here](https://github.com/concannon/ASCScraping/blob/master/rvest.R).  
+
+After parsing out the various fields, I geocoded the institutions with ggmap::geocode
+
+
+
+```{r,warning=F,message=F,echo=F, eval=F}
+#get data
+phds <- read_html('http://www.asc41.com/graduates1.htm')
+
+d <- phds %>% 
+  html_nodes('p , em , strong') %>% 
+  html_text() %>% 
+  #gsub('â€œ','"',.) %>% 
+  gsub('\r\n','',.) %>% 
+  gsub("[\\]",'',.)
+
+
+##Parse
+#Years
+yr <- "[1-9][0-9]{3}"
+
+years <- str_locate_all(d,yr)
+yearloc <- lapply(years,'[',1)
+yearloc <- data.frame(yearLoc=unlist(yearloc))
+years <- data.frame(Year=as.integer(str_extract(d,yr)))
+
+#find first period
+period <- str_locate_all(d,"\\.")
+period <- lapply(period,'[',1)
+period <- data.frame(PeriodLoc=unlist(period))
+
+
+#find special characters
+char <- str_locate_all(d,"\\?")
+char <- lapply(char,'[',1)
+char <- data.frame(CharLoc=unlist(char))
+#str_sub(d,1,char$CharLoc)
+
+#find first comma
+comma <- str_locate_all(d,",")
+comma <- lapply(comma,'[',1)
+comma <- data.frame(commaLoc=unlist(comma))
+#str_sub(d,1,comma$commaLoc)
+
+
+#find second comma
+comma2 <- str_locate_all(d,",")
+comma2 <- lapply(comma2,'[',2)
+comma2 <- data.frame(comma2Loc=unlist(comma2))
+#str_sub(d,1,comma2$comma2Loc)
+
+
+#extract name
+matches <- cbind(period,char,comma,comma2)
+matches$min <- apply(matches[,c(1,4)],1,min,na.rm=T)
+names <- data.frame(Name=str_sub(d,1,matches$min))
+
+
+#extract chair
+chair <- str_locate_all(d,"Chaired")
+chair <- lapply(chair,'[',1)
+chair <- data.frame(chairLoc=unlist(chair))
+chairLoc <- chair
+chair <- str_sub(d,chair$chairLoc,yearloc$yearLoc-1)
+chair <- str_trim(chair)
+chair <- str_replace(chair,"Chaired by","")
+chair <- str_replace(chair,"Chaired","")
+chair <- str_replace(chair,"by","")
+chair <- str_trim(chair)
+chair <- gsub('January|February|March|April|May|June|July|August|September|October|November|December',
+              '',chair)
+chair <- str_trim(chair)
+chair <- str_replace_all(chair,"[[:punct:]]","")
+chair <- str_replace_all(chair,"\\t","")
+chair <- str_replace_all(chair,"Dr","")
+chair <- str_replace_all(chair,"PhD","")
+chair <- str_replace_all(chair,"    ","")
+chair <- str_trim(chair)
+
+
+##Institution
+inst <- str_sub(d,yearloc$yearLoc+4,str_length(d))
+inst <- str_replace_all(inst,"[[:punct:]]","")
+inst <- gsub("[[:digit:]]","",inst)
+#inst <- gsub("[^[:alnum:]]","",inst)
+inst <- str_trim(inst)
+inst <- gsub("chaired by","",inst)
+inst <- gsub("chaired","",inst)
+inst <- gsub("by","",inst)
+inst <- data.frame(inst)
+
+
+##Geocode them
+univ <- data.frame(inst=unique(inst))
+univ$inst <- as.character(univ$inst)
+univ$inst <- gsub('CUNY Graduate Center','New York City,NY',univ$inst)
+univ <- na.omit(univ)
+
+
+#geo <- geocode(univ$inst) 
+#saveRDS(geo,'geo.rds')
+geo <- readRDS('geo.rds')
+univ <- cbind(univ,geo)
+names(univ) <- c('inst','lon','lat')
+inst <- left_join(inst,univ,by='inst')
+
+
+
+##title
+title <- str_sub(d,matches$min,chairLoc$chairLoc)
+title <- str_replace_all(title,"[[:punct:]]","")
+#title <- str_trim(title)
+#title <- gsub("[^[:alnum:]]","",title)
+title <- data.frame(Title=title)
+
+
+
+data <- cbind(years,names,chair,inst,title)
+# missmap(data)
+# Desc(data)
+saveRDS(data,'Clean Grads2.rds')
+rm(list=ls())
+
+
+```
+
+## Analysis
+This plot shows the number of cases with missing data, and for which variables data is missing.  Latitude and longitude are the most problematic.  I had trouble parsing out the chair from the institution, and in some instances (CUNY Graduate Center), google did not recognize the institution and did not geocode.
+
+```{r}
+
+  
+g <- readRDS("Clean Grads2.rds")
+g <- g %>% filter(Year>2002) %>%   filter(Year<2016)
+
+missmap(g)
+```
+
+##Locations
+Some of these locations were not properly geocoded.  You can still see the volume in the New York area, Michigan, Omaha, and Los Angeles.
+```{r}
+
+  
+  gjs <- g %>% 
+    select(inst,lat,lon) %>% 
+    filter(!lon=='NA') %>%
+    group_by(inst,lon=round(lon,5),lat=round(lat,5)) %>% 
+    summarise(num=n())
+
+
+inst <- gjs %>% group_by(lon,lat) %>% arrange(-num) %>% filter(row_number()==1)
+
+
+test <- left_join(gjs,inst,by=c('lon','lat')) %>% 
+  ungroup() %>%
+  select(inst.y,lon,lat,num.y) %>%
+  unique()
+
+
+
+
+leaflet() %>% 
+  addTiles() %>% 
+  setView(lat=40.95,lng=-96.58,zoom=4) %>% 
+  addCircleMarkers(lng=~lon,lat=~lat,radius=~num.y/2,
+                   data=test,
+                   popup=~inst.y)
+
+
+
+
+
+
+
+
+
+
+```
+
+## Wordcloud
+It had to be done.  These are trite plots, but also a good first step in examining text data.  Perhaps not surprisingly, police (and related variants) is the most common term.  And by a longshot.
+```{r,warning=F,fig.width=8,fig.height=8}
+  ds <- VectorSource(g$Title)
+  corp <- Corpus(ds)
+  corp <- tm_map(corp, removePunctuation)
+  corp <- tm_map(corp, tolower)
+  corp <- tm_map(corp, removeNumbers)
+  corp <- tm_map(corp, function(x){removeWords(x,c(stopwords(),
+                                                   'univers','graduate','social','florida','houston',
+                                                   'michael','john','college','jay',
+                                                   'university','chaired','criminal','august','state',
+                                                   'may','december','crime','justice','the',
+                                                   'study','analysis','examination','and','the',
+                                                   '\\?','\\???','o','othe','use','among'))})
+  
+  corp <- tm_map(corp, stemDocument)
+  corp <- tm_map(corp,PlainTextDocument)
+  term.matrix <- TermDocumentMatrix(corp)
+  termfreq <- rowSums(as.matrix(term.matrix))
+  terms <- data.frame(term=names(termfreq),freq=termfreq)
+  
+  pal <- brewer.pal(8,"Set1")
+  wordcloud(corp,max.words=200,colors=pal)
+
+
+  #findFreqTerms(term.matrix,20)
+  
+ 
+top50 <- terms %>% 
+  arrange(-freq) %>%
+  top_n(20)
+
+highchart() %>% 
+  hc_title(text='Top 20 Terms in CJ Dissertations',align='left') %>% 
+  hc_subtitle(text='Mentions in Dissertation Titles',align='left') %>% 
+  hc_add_series_labels_values(top50$term,top50$freq,
+                            name='Mentions',type='bar',dataLabels=list(enabled=F)) %>% 
+  hc_xAxis(categories=top50$term)
+
+```
+
+
+## Word Association
+TM has a great function, ```findAssocs() ```.  This function returns a list of words with a minimum specified correlation to the input word.  'Risk' is strongly associated with modeling, testing, and instruments.  The 'police' search also show the influence of public facing actions - contact and situations.    
+```{r,echo=T,warning=F}
+
+  
+
+findAssocs(term.matrix,"risk",.2)
+findAssocs(term.matrix,"police",.2)
+
+```
+
+
+## Term Graph
+This graph also shows the correlation between terms mentioned 15+ times.  The strongest relationships seem to be between risk and factors, and sex and offender.  The upper-left also shows an interesting cluster of policing and victimization terms.  I am not sure of the layout of this graph, so maybe it is nothing.
+
+The reduced plot of terms mentioned 20 times or more is easier to read.  Clear links between policing, community, and offenders.  Some of the terms are not properly 'stemming' - policing and police, offender and offending.
+```{r,echo=T,warning=F}
+freq.terms <- findFreqTerms(term.matrix,lowfreq=15)
+plot(term.matrix,term=freq.terms,corThreshold = .05,weighting=T)
+
+
+
+freq.terms <- findFreqTerms(term.matrix,lowfreq=20)
+plot(term.matrix,term=freq.terms,corThreshold = .05,weighting=T)
+```
+
+
+## Tidy Text
+This a package from David Robinson and Julia Silge.  Some examples straight from their vignettes.  Risk and offender have the most negative sentiment, while work, support, and intimate are mostly positive.
+```{r}
+
+
+bing <- sentiments %>% 
+  filter(lexicon=='bing') %>% 
+  select(-score)
+
+
+sent <- tidy(term.matrix) %>% 
+  inner_join(bing, by=c(term='word')) %>% 
+  count(term,sentiment,wt=count) %>% 
+  arrange(-n) %>% filter(n>2) %>% 
+  ungroup() %>% 
+  spread(sentiment,n,fill=0) %>% 
+  mutate(sentiment=positive-negative) %>% 
+  arrange(sentiment)
+
+
+sent %>%
+  mutate(term=reorder(term,sentiment)) %>%
+  ggplot(aes(term,sentiment,fill=sentiment))+geom_bar(stat='identity')+
+  theme(axis.text.x=element_text(angle=90,hjust=1))+
+  ggtitle('Term Sentiment')
+
+
+  ggplot(sent,aes(x=negative,y=positive,group=term))+geom_jitter() +
+  geom_text(aes(label=term),check_overlap = T)
+
+
+
+  
+  
+  words <- tidy(term.matrix) %>%
+  mutate(total=sum(count)) %>% 
+  bind_tf_idf(term,document,count) %>% 
+  select(-total) %>% 
+  arrange(tf_idf) %>% 
+  select(-count,-tf) %>% 
+  unique() %>% 
+  arrange(tf_idf)
+
+
+words
+
+
+
+```
+
