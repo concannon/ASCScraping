@@ -2,10 +2,8 @@
 title: "Criminal Justice Dissertation Topic Analysis"
 author: "Connor Concannon"
 date: '2016-11-06'
-output: 
-  html_document: 
-    fig_height: 7
-    fig_width: 9
+tags: [R, NLP]
+output: html_document
 editor_options: 
   chunk_output_type: console
 ---
@@ -19,22 +17,12 @@ The list was interesting to me for a few reasons.  One, I need to begin thinking
 First, load a bunch of libraries.
 
 ```{r setup, include=T,message=F,warning=F,echo=F}
-#source("http://bioconductor.org/biocLite.R")
-    #biocLite("Rgraphviz")
-    #library(Rgraphviz)
-    library(bnlearn)
-#install.packages('bnlearn')
-    #devtools::install_github("espanta/lubripack")
+
 pkg <- c('tidytext','rvest','stringr','dplyr','tm','SnowballC','wordcloud','DescTools',
 'ggmap','Amelia','leaflet','highcharter','LDAvis','graph','tidyr','Rgraphviz','ggplot2')
 
 library(lubripack)
 lubripack(pkg)
-
-# suppressPackageStartupMessages(
-# sapply(pkg,library,character.only=T)
-# )
-# options(scipen=1000)
 
 
 
@@ -177,7 +165,7 @@ This plot shows the number of cases with missing data, and for which variables d
 ```{r}
 
   
-g <- readRDS("Clean Grads2.rds")
+g <- readRDS("c:/users/connor/Desktop/ASCScraping/Clean Grads2.rds")
 g <- g %>% filter(Year>2002) %>%   filter(Year<2016)
 
 missmap(g,col=c('dimgrey','dodgerblue'))
@@ -264,12 +252,13 @@ gtidy %>%
 
 top20
 
-highchart() %>% 
-  hc_title(text='Top 20 Terms in CJ Dissertations',align='left') %>% 
-  hc_subtitle(text='Mentions in Dissertation Titles',align='left') %>% 
-  hc_add_series_labels_values(top20$word,top20$n,
-                            name='Mentions',type='bar',dataLabels=list(enabled=F)) %>% 
-  hc_xAxis(categories=top20$word)
+top20 %>% 
+  mutate(word=reorder(word,n)) %>% 
+  ggplot(aes(word,n))+geom_bar(stat='identity')+
+  coord_flip()+
+  theme_minimal()+
+  labs(title='Top 20 Terms in CJ Dissertations',
+       x='Mentions in Dissertation Titles')
 
 
 
